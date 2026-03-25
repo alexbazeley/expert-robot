@@ -11,7 +11,7 @@ with probability calibration via Platt scaling or isotonic regression.
 
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -182,7 +182,7 @@ class PassageModel:
             "stage2_positive_rate": n_pos_enacted / len(y_enacted) if len(y_enacted) else 0,
             "overall_enacted_rate": int(df["enacted"].sum()) / len(df) if len(df) else 0,
             "n_features": len(self.feature_columns),
-            "trained_at": datetime.utcnow().isoformat(),
+            "trained_at": datetime.now(UTC).isoformat(),
             "random_seed": RANDOM_SEED,
         }
 
