@@ -22,6 +22,7 @@ data/*.db
 models/ohio/*.joblib
 models/ohio/*.json
 models/ohio/*.png
+models/test/
 
 # IDE
 .vscode/
