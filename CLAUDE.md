@@ -112,6 +112,75 @@ When presenting a prediction to the user, always note:
 4. **Predictions are point-in-time.** The probability should be re-computed as the bill accumulates new actions (committee hearings, amendments, floor votes).
 5. **State legislatures are less studied than Congress.** Most published research targets Congress. State legislative dynamics differ — smaller bodies, less media scrutiny, more influence from gubernatorial preferences and party leadership.
 
+## Current Implementation Status
+
+### Phase 1: Foundation & Data Ingestion (COMPLETE)
+
+All core infrastructure is built and tested (49 tests passing):
+
+- **LegiScan API Client** (`src/data/legiscan_client.py`): Full Pull API wrapper with local JSON caching (by operation + params hash), rate limiting (0.5s default delay), change_hash-based delta sync, and proper error handling. Supports all key endpoints: getSessionList, getMasterList/Raw, getBill, getRollCall, getPerson, getDataset/List, search/Raw.
+
+- **Database Schema** (`src/data/schema.py`): SQLAlchemy ORM with 10 tables: sessions, bills, legislators, bill_sponsors, bill_history, committees, committee_referrals, roll_calls, votes, amendments. Indexed for feature query performance.
+
+- **Ohio Data Loader** (`src/data/ohio_loader.py`): Supports two modes — bulk ZIP dataset extraction (preferred for historical sessions) and per-bill API fetching (fallback). Handles upserts for all entities. Includes incremental sync via `sync_current_session()` using change_hash comparison.
+
+- **Feature Engineering** (`src/features/`): 47 features across 4 modules:
+  - `sponsor_features.py`: 13 features (majority party, leadership, seniority, success rate, bipartisan score, committee overlap, cross-chamber cosponsors)
+  - `committee_features.py`: 6 features (pass-through rate, hearing count, chair-sponsor alignment)
+  - `bill_features.py`: 20 features (progress stage, staleness, roll calls, amendments, companion detection, text length, appropriations flag, early introduction)
+  - `session_features.py`: 11 features (session % elapsed, election year, partisan composition, trifecta/supermajority, base rates by type and committee)
+  - `build_features.py`: Orchestrator that queries bills from DB, computes all features, outputs a pandas DataFrame
+
+- **Prediction Model** (`src/models/passage_model.py`): Two-stage architecture (P(exits committee) * P(enacted | exits committee)). XGBoost primary with scale_pos_weight for imbalance. Logistic Regression baseline. Isotonic/Platt calibration. Save/load via joblib.
+
+- **Evaluation** (`src/models/evaluate.py`): AUC-ROC, AUC-PR, Brier score, log loss, ECE. Calibration plots, ROC/PR curve generation. SHAP value computation (TreeExplainer for XGBoost, KernelExplainer for logistic). Per-bill explanation with top positive/negative factors.
+
+- **Prediction Interface** (`src/predict.py`): Single-bill analyzer that fetches fresh data, computes features, runs model, and generates a structured result with narrative summary. Resolves bill numbers via search.
+
+- **CLI** (`src/cli.py`): Click-based with commands: load-data, sync, train, evaluate, predict, features. All commands support --verbose.
+
+- **Tests**: 49 tests across 3 files — API client (mock responses, caching, error handling), feature computation (in-memory SQLite with known data), model training/evaluation (synthetic data smoke tests).
+
+### What Has NOT Been Built Yet
+
+- No real data has been loaded (requires API key)
+- No model has been trained on real data
+- No NLP/text features (Phase 2)
+- No multi-state generalization beyond Ohio config (Phase 3)
+- No dashboard or scheduled re-scoring (Phase 4)
+- No individual vote prediction (Phase 5)
+- Committee membership data is approximated (LegiScan doesn't directly expose it)
+
+## Key Architectural Decisions
+
+- **SQLite** for local storage: zero-config, portable, sufficient for single-state analysis
+- **Two-stage model**: matches legislative process and GovTrack methodology; committee survival and final passage have different predictive dynamics
+- **No NLP in Phase 1**: structured features alone achieve 75-85% of max predictive power per literature; text analysis deferred to Phase 2
+- **Temporal validation only**: train on earlier sessions, test on later; never random CV across time
+- **Isotonic calibration** preferred over Platt: more flexible for non-linear calibration curves typical in legislative prediction
+- **SHAP over impurity-based importance**: provides directional attribution per feature per prediction, not just global rankings
+
+## File Inventory
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `src/config.py` | ~130 | All configuration: paths, API, DB, state metadata, hyperparameters |
+| `src/data/legiscan_client.py` | ~330 | LegiScan Pull API client with caching and rate limiting |
+| `src/data/ohio_loader.py` | ~420 | Bulk + per-bill data loading into SQLite |
+| `src/data/schema.py` | ~230 | SQLAlchemy ORM (10 tables) |
+| `src/features/build_features.py` | ~230 | Feature matrix orchestrator |
+| `src/features/sponsor_features.py` | ~250 | 13 sponsor/cosponsor features |
+| `src/features/committee_features.py` | ~150 | 6 committee features |
+| `src/features/bill_features.py` | ~200 | 20 bill lifecycle/content features |
+| `src/features/session_features.py` | ~140 | 11 session context features |
+| `src/models/passage_model.py` | ~310 | Two-stage model with calibration |
+| `src/models/evaluate.py` | ~290 | Metrics, calibration, SHAP, plots |
+| `src/predict.py` | ~280 | Single-bill prediction with narrative |
+| `src/cli.py` | ~200 | Click CLI |
+| `tests/test_legiscan_client.py` | ~170 | 16 API client tests |
+| `tests/test_features.py` | ~250 | 22 feature computation tests |
+| `tests/test_model.py` | ~220 | 11 model training/eval tests |
+
 ## Extension Points (Future Phases)
 
 - **Phase 2**: Add NLP features (bill text embeddings, subject classification)
