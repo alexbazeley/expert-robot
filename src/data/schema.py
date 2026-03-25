@@ -6,7 +6,7 @@ legislator profiles. Designed for state-agnostic use but populated initially
 with Ohio data.
 """
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -44,7 +44,7 @@ class Session(Base):
     year_start = Column(Integer, nullable=False)
     year_end = Column(Integer, nullable=False)
     special = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     bills = relationship("Bill", back_populates="session")
 
@@ -65,8 +65,8 @@ class Legislator(Base):
     district = Column(String(50))
     state_abbr = Column(String(2))
     committee_sponsor = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     sponsorships = relationship("BillSponsor", back_populates="legislator")
     votes = relationship("Vote", back_populates="legislator")
@@ -82,7 +82,7 @@ class Committee(Base):
     chamber = Column(String(10))  # "H" or "S"
     name = Column(String(300), nullable=False)
     state_abbr = Column(String(2))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     referrals = relationship("CommitteeReferral", back_populates="committee")
 
@@ -114,8 +114,8 @@ class Bill(Base):
     subject_areas = Column(Text)  # JSON-encoded list of subjects
     text_length = Column(Integer)  # character count of bill text
     enacted = Column(Boolean, default=False)  # derived: True if status==4
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     session = relationship("Session", back_populates="bills")
     sponsors = relationship("BillSponsor", back_populates="bill")
