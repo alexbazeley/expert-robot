@@ -65,6 +65,42 @@ def _extract_bill_type(bill_number: str) -> str:
     return parts[0] if parts else ""
 
 
+def _ensure_list(value: Any) -> list:
+    """Normalize a value that may be a dict (keyed by index) or a list.
+
+    LegiScan bulk data sometimes encodes arrays as dicts with string keys
+    like {"0": {...}, "1": {...}}. This normalizes to a list.
+    """
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return list(value.values())
+    return []
+
+
+def _normalize_progress(progress_raw: Any) -> int:
+    """Normalize the progress field from LegiScan data.
+
+    In the per-bill API response, progress is an integer (0-4).
+    In bulk dataset JSON, it may be a list of dicts like:
+        [{'date': '2015-01-28', 'event': 1}, {'date': '2015-02-10', 'event': 2}]
+    We extract the max event value as the current progress stage.
+    """
+    if isinstance(progress_raw, int):
+        return progress_raw
+    if isinstance(progress_raw, list):
+        if not progress_raw:
+            return 0
+        # Each entry has an 'event' key with the progress stage
+        events = [
+            entry.get("event", entry.get("step", 0))
+            for entry in progress_raw
+            if isinstance(entry, dict)
+        ]
+        return max(events) if events else 0
+    return 0
+
+
 class OhioDataLoader:
     """Loads Ohio legislative data from LegiScan into the local database.
 
@@ -270,24 +306,54 @@ class OhioDataLoader:
                     person_data = data.get("person", data)
                     self._upsert_legislator(db, person_data)
                 except Exception as e:
+                    db.rollback()
                     logger.warning("Failed to load person file %s: %s", pf, e)
 
-            # Load bills
+            try:
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.warning("Failed to commit legislators: %s", e)
+
+            # Load bills — commit in batches with per-bill error isolation
+            loaded = 0
+            failed = 0
             for bf in bill_files:
                 try:
                     with open(bf) as f:
                         data = json.load(f)
                     bill_data = data.get("bill", data)
                     self._upsert_bill(db, bill_data, session_id, session_num)
-                except Exception as e:
-                    logger.warning("Failed to load bill file %s: %s", bf, e)
+                    loaded += 1
 
-            db.commit()
-            logger.info("Committed bulk data for session %d", session_id)
+                    # Commit in batches of 100 to avoid holding too much in memory
+                    if loaded % 100 == 0:
+                        db.commit()
+                        logger.info("  Committed %d bills...", loaded)
+
+                except Exception as e:
+                    db.rollback()
+                    failed += 1
+                    if failed <= 5:
+                        logger.warning("Failed to load bill file %s: %s", bf.name, e)
+                    elif failed == 6:
+                        logger.warning("Suppressing further bill load warnings...")
+
+            try:
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.warning("Failed to commit final bill batch: %s", e)
+
+            logger.info(
+                "Bulk data for session %d: %d loaded, %d failed",
+                session_id, loaded, failed,
+            )
 
         # Load roll calls
         rollcall_files = list(bulk_dir.rglob("roll_call/*.json"))
         if rollcall_files:
+            rc_loaded = 0
             with self._session_factory() as db:
                 for rf in rollcall_files:
                     try:
@@ -295,10 +361,17 @@ class OhioDataLoader:
                             data = json.load(f)
                         rc_data = data.get("roll_call", data)
                         self._upsert_roll_call(db, rc_data)
+                        rc_loaded += 1
+                        if rc_loaded % 100 == 0:
+                            db.commit()
                     except Exception as e:
-                        logger.warning("Failed to load roll call file %s: %s", rf, e)
-                db.commit()
-            logger.info("Loaded %d roll call files for session %d", len(rollcall_files), session_id)
+                        db.rollback()
+                        logger.debug("Failed to load roll call file %s: %s", rf.name, e)
+                try:
+                    db.commit()
+                except Exception as e:
+                    db.rollback()
+            logger.info("Loaded %d/%d roll call files for session %d", rc_loaded, len(rollcall_files), session_id)
 
     def _load_from_api(self, session_id: int, session_num: int) -> None:
         """Load session data by fetching each bill individually from the API."""
@@ -385,29 +458,38 @@ class OhioDataLoader:
 
         bill_number = bill_data.get("bill_number", "")
         bill_type = _extract_bill_type(bill_number)
-        status = bill_data.get("status", 0)
-        progress = bill_data.get("progress", 0)
+        status_raw = bill_data.get("status", 0)
+        status = status_raw if isinstance(status_raw, int) else 0
+        progress = _normalize_progress(bill_data.get("progress", 0))
 
         # Parse introduced date from history
         introduced_date = None
-        history = bill_data.get("history", [])
-        if history:
+        history = _ensure_list(bill_data.get("history", []))
+        if history and isinstance(history[0], dict):
             introduced_date = _parse_date(history[0].get("date"))
 
         last_action_date = _parse_date(bill_data.get("last_action_date"))
         last_action = bill_data.get("last_action", "")
 
-        # Subjects
-        subjects = bill_data.get("subjects", [])
-        subject_text = json.dumps([s.get("subject_name", "") for s in subjects]) if subjects else "[]"
+        # Subjects — handle both list-of-dicts and list-of-strings
+        subjects_raw = _ensure_list(bill_data.get("subjects", []))
+        subject_names = []
+        for s in (subjects_raw or []):
+            if isinstance(s, dict):
+                subject_names.append(s.get("subject_name", ""))
+            elif isinstance(s, str):
+                subject_names.append(s)
+        subject_text = json.dumps(subject_names)
 
         # Text length (from texts list if available)
         text_length = 0
-        texts = bill_data.get("texts", [])
+        texts = _ensure_list(bill_data.get("texts", []))
         if texts:
             # Use doc_size of the most recent text version
-            latest_text = max(texts, key=lambda t: t.get("date", ""), default={})
-            text_length = latest_text.get("doc_size", 0)
+            text_entries = [t for t in texts if isinstance(t, dict)]
+            if text_entries:
+                latest_text = max(text_entries, key=lambda t: t.get("date", ""), default={})
+                text_length = latest_text.get("doc_size", 0)
 
         existing = db.execute(
             select(Bill).where(Bill.bill_id == bill_id)
@@ -450,16 +532,16 @@ class OhioDataLoader:
             db.add(bill_record)
 
         # Sponsors
-        self._load_sponsors(db, bill_id, bill_data.get("sponsors", []))
+        self._load_sponsors(db, bill_id, _ensure_list(bill_data.get("sponsors", [])))
 
         # History
-        self._load_history(db, bill_id, history)
+        self._load_history(db, bill_id, _ensure_list(history))
 
         # Committee referrals
         self._load_committees(db, bill_id, bill_data.get("committee", {}))
 
         # Amendments
-        self._load_amendments(db, bill_id, bill_data.get("amendments", []))
+        self._load_amendments(db, bill_id, _ensure_list(bill_data.get("amendments", [])))
 
     def _load_sponsors(
         self,
@@ -626,7 +708,7 @@ class OhioDataLoader:
             ))
 
             # Individual votes
-            for vote in rc_data.get("votes", []):
+            for vote in _ensure_list(rc_data.get("votes", [])):
                 people_id = vote.get("people_id")
                 if not people_id:
                     continue
