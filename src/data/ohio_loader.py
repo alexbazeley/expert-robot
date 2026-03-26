@@ -60,9 +60,10 @@ def _parse_date(date_str: str | None) -> date | None:
 
 
 def _extract_bill_type(bill_number: str) -> str:
-    """Extract bill type prefix from bill number (e.g., 'HB 123' -> 'HB')."""
-    parts = bill_number.strip().split()
-    return parts[0] if parts else ""
+    """Extract bill type prefix from bill number (e.g., 'HB 123' -> 'HB', 'HB123' -> 'HB')."""
+    import re
+    match = re.match(r'^([A-Za-z]+)', bill_number.strip())
+    return match.group(1).upper() if match else ""
 
 
 def _ensure_list(value: Any) -> list:

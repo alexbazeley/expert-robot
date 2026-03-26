@@ -142,7 +142,10 @@ def build_feature_matrix(
             # Query all bills for this session
             query = select(Bill).where(Bill.session_id == session_id)
             if bill_types:
-                query = query.where(Bill.bill_type.in_(bill_types))
+                from sqlalchemy import or_
+                # Match bill_type prefix — handles both "HB" and "HB123" formats
+                type_filters = [Bill.bill_type.like(f"{bt}%") for bt in bill_types]
+                query = query.where(or_(*type_filters))
 
             bills = db.execute(query).scalars().all()
             logger.info("Processing %d bills for session %d", len(bills), session_num)

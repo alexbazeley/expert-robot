@@ -64,7 +64,10 @@ def compute_bill_features(
         introduced_date = datetime.strptime(introduced_date, "%Y-%m-%d").date()
 
     # --- Bill type ---
-    bill_type = bill_row.get("bill_type", "")
+    bill_type_raw = bill_row.get("bill_type", "")
+    # Extract alpha prefix (e.g., "HB123" -> "HB", "HB" -> "HB")
+    import re
+    bill_type = re.match(r'^([A-Za-z]+)', bill_type_raw).group(1).upper() if re.match(r'^([A-Za-z]+)', bill_type_raw) else ""
     features["bill_type_encoded"] = BILL_TYPE_MAP.get(bill_type, 0)
     features["is_resolution"] = int(bill_type in ("HR", "SR", "HCR", "SCR", "HJR", "SJR"))
     features["is_joint_resolution"] = int(bill_type in ("HJR", "SJR"))
