@@ -54,8 +54,6 @@ FEATURE_COLUMNS: list[str] = [
     "is_resolution",
     "is_joint_resolution",
     "originating_chamber",
-    "progress",
-    "status",
     "days_since_introduction",
     "days_since_last_action",
     "history_event_count",

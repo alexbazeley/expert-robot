@@ -97,7 +97,7 @@ def sync(state: str, session: int) -> None:
 @click.option("--state", default="OH", help="State abbreviation.")
 @click.option("--sessions", default=None, help="Training session numbers (comma-separated).")
 @click.option("--model-type", default="xgboost", type=click.Choice(["xgboost", "logistic"]))
-@click.option("--bill-types", default=None, help="Filter bill types (comma-separated, e.g., HB,SB).")
+@click.option("--bill-types", default="HB,SB", help="Filter bill types (comma-separated). Default: HB,SB. Use 'all' for all types.")
 @click.option("--tag", default="", help="Tag for model artifact filename.")
 def train(state: str, sessions: str | None, model_type: str, bill_types: str | None, tag: str) -> None:
     """Train the passage prediction model on historical data."""
@@ -109,7 +109,7 @@ def train(state: str, sessions: str | None, model_type: str, bill_types: str | N
         train_sessions = [int(s.strip()) for s in sessions.split(",")]
 
     types = None
-    if bill_types:
+    if bill_types and bill_types.lower() != "all":
         types = [t.strip() for t in bill_types.split(",")]
 
     click.echo(f"Building feature matrix for sessions: {train_sessions}...")
@@ -137,15 +137,20 @@ def train(state: str, sessions: str | None, model_type: str, bill_types: str | N
 @click.option("--state", default="OH", help="State abbreviation.")
 @click.option("--test-session", default=VALIDATION_SESSION, type=int, help="Session to test on.")
 @click.option("--model-type", default="xgboost", type=click.Choice(["xgboost", "logistic"]))
+@click.option("--bill-types", default="HB,SB", help="Filter bill types (comma-separated). Default: HB,SB. Use 'all' for all types.")
 @click.option("--tag", default="", help="Model tag to evaluate.")
-def evaluate(state: str, test_session: int, model_type: str, tag: str) -> None:
+def evaluate(state: str, test_session: int, model_type: str, bill_types: str | None, tag: str) -> None:
     """Evaluate model on a held-out session (temporal validation)."""
     from src.features.build_features import build_feature_matrix
     from src.models.evaluate import evaluate_model
     from src.models.passage_model import PassageModel
 
+    types = None
+    if bill_types and bill_types.lower() != "all":
+        types = [t.strip() for t in bill_types.split(",")]
+
     click.echo(f"Building features for test session {test_session}...")
-    test_df = build_feature_matrix(sessions=[test_session])
+    test_df = build_feature_matrix(sessions=[test_session], bill_types=types)
 
     if test_df.empty:
         click.echo(f"No data for session {test_session}. Run load-data first.")

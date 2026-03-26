@@ -52,8 +52,6 @@ def synthetic_data() -> pd.DataFrame:
     data["is_resolution"] = (data["bill_type_encoded"] >= 3).astype(int)
     data["is_joint_resolution"] = (data["bill_type_encoded"].astype(int) == 3).astype(int)
     data["originating_chamber"] = rng.binomial(1, 0.6, n)
-    data["progress"] = rng.choice([0, 1, 2, 3, 4], n, p=[0.05, 0.6, 0.2, 0.1, 0.05])
-    data["status"] = rng.choice([1, 2, 3, 4, 5, 6], n, p=[0.6, 0.1, 0.05, 0.05, 0.05, 0.15])
     data["days_since_introduction"] = rng.exponential(100, n).astype(int)
     data["days_since_last_action"] = rng.exponential(30, n).astype(int)
     data["history_event_count"] = rng.poisson(4, n)
@@ -86,8 +84,7 @@ def synthetic_data() -> pd.DataFrame:
 
     # Generate target with realistic signal
     logit = (
-        0.5 * data["progress"]
-        + 0.3 * data["sponsor_majority_party"]
+        0.3 * data["sponsor_majority_party"]
         + 0.2 * data["sponsor_leadership"]
         + 0.1 * data["cosponsor_count"]
         - 0.01 * data["days_since_last_action"]
@@ -98,6 +95,9 @@ def synthetic_data() -> pd.DataFrame:
     data["enacted"] = rng.binomial(1, prob)
 
     df = pd.DataFrame(data)
+
+    # Add progress column (not a model feature, but needed for stage 1 target)
+    df["progress"] = rng.choice([0, 1, 2, 3, 4], n, p=[0.05, 0.6, 0.2, 0.1, 0.05])
 
     # Verify all feature columns are present
     for col in FEATURE_COLUMNS:
@@ -177,7 +177,7 @@ class TestPassageModel:
 
     def test_missing_features_raises(self, synthetic_data: pd.DataFrame) -> None:
         model = PassageModel(model_type="xgboost", calibrate=False)
-        bad_df = synthetic_data.drop(columns=["progress"])
+        bad_df = synthetic_data.drop(columns=["sponsor_majority_party"])
         with pytest.raises(ValueError, match="Missing feature columns"):
             model.train(bad_df)
 
@@ -217,14 +217,14 @@ class TestEvaluation:
         n = 100
         data = {col: rng.random(n) for col in FEATURE_COLUMNS}
         data["enacted"] = np.zeros(n, dtype=int)
-        data["progress"] = rng.randint(0, 3, n)
+        data["progress"] = rng.randint(0, 3, n)  # non-feature column needed for stage 1 target
         df = pd.DataFrame(data)
 
         model = PassageModel(model_type="xgboost", calibrate=False)
         # Need some positives for training
         train_data = df.copy()
         train_data.loc[:9, "enacted"] = 1
-        train_data.loc[:9, "progress"] = 4
+        train_data.loc[:9, "progress"] = 4  # these bills "passed" both chambers
         model.train(train_data)
 
         metrics = evaluate_model(model, df)

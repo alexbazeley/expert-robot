@@ -124,7 +124,7 @@ All core infrastructure is built and tested (49 tests passing):
 
 - **Ohio Data Loader** (`src/data/ohio_loader.py`): Supports two modes — bulk ZIP dataset extraction (preferred for historical sessions) and per-bill API fetching (fallback). Handles upserts for all entities. Includes incremental sync via `sync_current_session()` using change_hash comparison.
 
-- **Feature Engineering** (`src/features/`): 47 features across 4 modules:
+- **Feature Engineering** (`src/features/`): 45 features across 4 modules:
   - `sponsor_features.py`: 13 features (majority party, leadership, seniority, success rate, bipartisan score, committee overlap, cross-chamber cosponsors)
   - `committee_features.py`: 6 features (pass-through rate, hearing count, chair-sponsor alignment)
   - `bill_features.py`: 20 features (progress stage, staleness, roll calls, amendments, companion detection, text length, appropriations flag, early introduction)
@@ -141,10 +141,16 @@ All core infrastructure is built and tested (49 tests passing):
 
 - **Tests**: 49 tests across 3 files — API client (mock responses, caching, error handling), feature computation (in-memory SQLite with known data), model training/evaluation (synthetic data smoke tests).
 
+### Known Issues Fixed
+
+- **Data leakage (fixed)**: `progress` and `status` features were directly encoding the prediction target (`enacted = status == 4`, `progress = 4` means passed both chambers). These have been removed from FEATURE_COLUMNS (45 features, down from 47). They remain in the DataFrame for stage 1 target definition (`y_committee = progress >= 2`).
+
+- **Inflated enacted rate (fixed)**: Default training/evaluation now filters to HB and SB only. Resolutions (HR, SR, HCR, SCR, HJR, SJR) have much higher passage rates (~50%+) and were inflating the base rate from the expected 5-15% to ~52%. Use `--bill-types all` to include resolutions.
+
+- **Bulk data format quirks (fixed)**: LegiScan bulk ZIPs encode arrays as dicts (`{"0": {...}, "1": {...}}`) and `progress` as a list of event dicts. The loader normalizes both via `_ensure_list()` and `_normalize_progress()`.
+
 ### What Has NOT Been Built Yet
 
-- No real data has been loaded (requires API key)
-- No model has been trained on real data
 - No NLP/text features (Phase 2)
 - No multi-state generalization beyond Ohio config (Phase 3)
 - No dashboard or scheduled re-scoring (Phase 4)
@@ -159,6 +165,7 @@ All core infrastructure is built and tested (49 tests passing):
 - **Temporal validation only**: train on earlier sessions, test on later; never random CV across time
 - **Isotonic calibration** preferred over Platt: more flexible for non-linear calibration curves typical in legislative prediction
 - **SHAP over impurity-based importance**: provides directional attribution per feature per prediction, not just global rankings
+- **progress/status excluded from features**: These fields encode the outcome directly. The model must learn from structural, sponsor, committee, and session signals — not from the answer itself.
 
 ## File Inventory
 
@@ -171,7 +178,7 @@ All core infrastructure is built and tested (49 tests passing):
 | `src/features/build_features.py` | ~230 | Feature matrix orchestrator |
 | `src/features/sponsor_features.py` | ~250 | 13 sponsor/cosponsor features |
 | `src/features/committee_features.py` | ~150 | 6 committee features |
-| `src/features/bill_features.py` | ~200 | 20 bill lifecycle/content features |
+| `src/features/bill_features.py` | ~200 | 18 bill lifecycle/content features (progress/status excluded from model) |
 | `src/features/session_features.py` | ~140 | 11 session context features |
 | `src/models/passage_model.py` | ~310 | Two-stage model with calibration |
 | `src/models/evaluate.py` | ~290 | Metrics, calibration, SHAP, plots |

@@ -48,8 +48,6 @@ FEATURE_LABELS: dict[str, str] = {
     "committee_pass_through_rate": "Committee historical pass-through rate",
     "committee_hearing_count": "Committee actions on this bill",
     "committee_chair_is_sponsor": "Committee chair sponsors this bill",
-    "progress": "Current progress stage",
-    "status": "Current status code",
     "days_since_introduction": "Days since introduction",
     "days_since_last_action": "Days since last action (staleness)",
     "history_event_count": "Number of status events",
@@ -142,7 +140,7 @@ def predict_bill(
     features = build_single_bill_features(bill_id, database_url, snapshot)
 
     # Load trained model
-    model = PassageModel.load(state="ohio", model_type=model_type)
+    model = PassageModel.load(state=state.lower(), model_type=model_type)
 
     # Get prediction with SHAP explanation
     explanation = get_bill_explanation(model, features)
