@@ -145,6 +145,10 @@ def predict_bill(
     # Get prediction with SHAP explanation
     explanation = get_bill_explanation(model, features)
 
+    # Normalize progress from API response (may be list of event dicts)
+    from src.data.ohio_loader import _normalize_progress
+    progress_val = _normalize_progress(bill_data.get("progress", 0))
+
     # Construct result
     result: dict[str, Any] = {
         "bill_id": bill_id,
@@ -153,8 +157,8 @@ def predict_bill(
         "state": state,
         "status": bill_data.get("status", 0),
         "status_label": bill_data.get("status_desc", ""),
-        "progress": bill_data.get("progress", 0),
-        "progress_label": PROGRESS_LABELS.get(bill_data.get("progress", 0), "Unknown"),
+        "progress": progress_val,
+        "progress_label": PROGRESS_LABELS.get(progress_val, "Unknown"),
         "prediction": {
             "p_enacted": explanation["p_enacted"],
             "p_committee": explanation["p_committee"],
