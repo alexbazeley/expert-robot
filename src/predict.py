@@ -290,7 +290,7 @@ def _generate_narrative(result: dict[str, Any]) -> str:
             f"\n**Base rate context:** The historical passage rate for this bill type "
             f"is {base_rate * 100:.1f}%."
         )
-        if relative is not None:
+        if relative is not None and relative > 0:
             if relative > 1.5:
                 lines.append(
                     f"This bill is **{relative:.1f}x more likely** to pass than "
