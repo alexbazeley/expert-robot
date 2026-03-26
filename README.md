@@ -45,7 +45,7 @@ This creates `data/ohio_legislature.db` containing bills, sponsors, committees, 
 
 ### 5. Train the Model
 
-Train on historical sessions (default: 131st-134th GA):
+Train on historical sessions (default: 131st-134th GA, HB and SB only):
 
 ```bash
 python -m src.cli train --state OH
@@ -58,10 +58,10 @@ python -m src.cli train --state OH --sessions 131,132,133,134,135 --model-type x
 python -m src.cli train --state OH --model-type logistic
 ```
 
-Filter to specific bill types (e.g., only House and Senate Bills):
+Include all bill types (including resolutions):
 
 ```bash
-python -m src.cli train --state OH --bill-types HB,SB
+python -m src.cli train --state OH --bill-types all
 ```
 
 Model artifacts are saved to `models/ohio/`.
@@ -144,14 +144,16 @@ Following [GovTrack's methodology](https://www.govtrack.us/about/analysis), the 
 
 **Combined**: P(enacted) = P(exits committee) x P(enacted | exits committee)
 
-### 47 Engineered Features
+### 45 Engineered Features
 
 | Category | Count | Key Features |
 |----------|-------|-------------|
 | **Sponsor** | 13 | Majority party, leadership position, seniority, historical success rate, bipartisan cosponsorship score, cosponsors on assigned committee |
 | **Committee** | 6 | Historical pass-through rate, hearing count, chair alignment with sponsors |
-| **Bill** | 20 | Progress stage, days since last action (staleness), roll call results, amendments, companion bill detection, text length, appropriations flag |
+| **Bill** | 18 | Days since last action (staleness), roll call results, amendments, companion bill detection, text length, appropriations flag |
 | **Session** | 11 | % session elapsed, election year, partisan composition, trifecta/supermajority, historical base rates by bill type and committee |
+
+Note: `progress` and `status` are intentionally excluded from model features to prevent data leakage (they directly encode the outcome). They remain in the data pipeline for stage 1 target definition.
 
 Features are derived from the political science literature on legislative prediction (GovTrack Prognosis, Nay 2016/Skopos Labs, Yano/Smith/Wilkerson 2012, VPF Framework 2025).
 
